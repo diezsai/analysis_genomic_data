@@ -1,0 +1,4 @@
+contig  pauseSite       pauseSitePlus1  read_id abs_step_normalized_by_sd       strand  alignLen        step    dens_at_left_of_step    dens_at_right_of_step    boundary_left_of_step   boundary_right_of_step  detectIndex
+chrI    63767   63768   15053274-6f1d-44a7-b307-0b3745bc1db4    4.7581  +       66525   -0.368  0.339   0.707   60449   66198   15053274-6f1d-44a7-b307-0b3745bc1db4_chrI_0_66525_fwd_L_60449_66198
+chrI    10000   10001   16053274-6f1d-44a7-b307-0b3745bc1db4    4.7581  -       66525   -0.368  0.339   0.707   9000   12000   16053274-6f1d-44a7-b307-0b3745bc1db4_chrI_0_66525_rev_L_9000_12000
+chrII    3000   3001   17053274-6f1d-44a7-b307-0b3745bc1db4    4.7581  +       66525   -0.368  0.339   0.707   1000   5000   17053274-6f1d-44a7-b307-0b3745bc1db4_chrII_0_66525_fwd_L_1000_5000
