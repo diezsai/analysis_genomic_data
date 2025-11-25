@@ -27,8 +27,13 @@ def parse_args():
 def load_fork_file(fork_file, fork_type):
     """Load fork file and return a DataFrame with relevant columns."""
     cols = ["contig", f"{fork_type}_start", f"{fork_type}_end", "readID", "contig2", "x1", "x2", "strand"]
-    df = pd.read_csv(fork_file, delim_whitespace=True, header=None, names=cols)
-    return df[["readID", f"{fork_type}_start", f"{fork_type}_end"]].astype(int)
+    df = pd.read_csv(fork_file, sep=r'\s+', header=None, names=cols)
+    
+    # Convert only the start/end columns to int
+    df[f"{fork_type}_start"] = df[f"{fork_type}_start"].astype(int)
+    df[f"{fork_type}_end"] = df[f"{fork_type}_end"].astype(int)
+    
+    return df[["readID", f"{fork_type}_start", f"{fork_type}_end"]]
 
 
 def assign_fork(row, lf_df, rf_df):
