@@ -1,0 +1,2 @@
+contig	pauseSite	pauseSitePlus1	read_id	abs_step_normalized_by_sd	strand	alignLen	step	dens_at_left_of_step	dens_at_right_of_step	boundary_left_of_step	boundary_right_of_step	detectIndex	left_fork_start	left_fork_end	right_fork_start	right_fork_end	direction
+chrII	3000	3001	17053274-6f1d-44a7-b307-0b3745bc1db4	4.7581	+	66525	-0.368	0.339	0.707	1000	5000	17053274-6f1d-44a7-b307-0b3745bc1db4_chrII_0_66525_fwd_R_1000_6000	NA	NA	1000	6000	R
