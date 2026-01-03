@@ -12,99 +12,140 @@ Usage:
 
 import pandas as pd
 import argparse
+import os
 
 
 def parse_args():
-    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Update a pause file with fork information.")
-    parser.add_argument("--pause_file", required=True, help="Path to the pause file")
-    parser.add_argument("--left_fork_file", required=True, help="Path to the left fork file")
-    parser.add_argument("--right_fork_file", required=True, help="Path to the right fork file")
-    parser.add_argument("--output_file", required=True, help="Path to save the updated pause file")
+    parser.add_argument("--pause_file", required=True)
+    parser.add_argument("--left_fork_file", required=True)
+    parser.add_argument("--right_fork_file", required=True)
+    parser.add_argument("--output_file", required=True)
     return parser.parse_args()
 
 
 def load_fork_file(fork_file, fork_type):
-    """Load fork file and return a DataFrame with relevant columns."""
-    cols = ["contig", f"{fork_type}_start", f"{fork_type}_end", "readID", "contig2", "x1", "x2", "strand"]
-    df = pd.read_csv(fork_file, sep=r'\s+', header=None, names=cols)
-    
-    # Convert only the start/end columns to int
+    """
+    Fork file columns (no header): contig fork_start fork_end read_id contig start_read end_read strand
+    """
+    cols = ["contig", f"{fork_type}_start", f"{fork_type}_end", "readID",
+            "contig2", "start_read", "end_read", "strand"]
+    df = pd.read_csv(fork_file, sep=r"\s+", header=None, names=cols)
     df[f"{fork_type}_start"] = df[f"{fork_type}_start"].astype(int)
     df[f"{fork_type}_end"] = df[f"{fork_type}_end"].astype(int)
-    
-    return df[["readID", f"{fork_type}_start", f"{fork_type}_end"]]
+
+    # Map strand
+    df["strand"] = df["strand"].map({"fwd": "+", "rev": "-"})
+
+    # Set direction
+    df["direction"] = "L" if fork_type == "lf" else "R"
+
+    return df
 
 
 def assign_fork(row, lf_df, rf_df):
-    """Assign left or right fork coordinates to a row of the pause file."""
     ps = row["pauseSite"]
     readID = row["readID"]
 
-    match_L = lf_df[(lf_df["readID"] == readID) & (lf_df["lf_start"] <= ps) & (lf_df["lf_end"] >= ps)]
+    # Check left forks
+    match_L = lf_df[(lf_df["readID"] == readID) &
+                    (lf_df["lf_start"] <= ps) &
+                    (lf_df["lf_end"] >= ps)]
     if not match_L.empty:
+        r = match_L.iloc[0]
         row["direction"] = "L"
-        row["left_fork_start"] = match_L.iloc[0]["lf_start"]
-        row["left_fork_end"] = match_L.iloc[0]["lf_end"]
+        row["left_fork_start"] = r["lf_start"]
+        row["left_fork_end"] = r["lf_end"]
+        row["strand"] = r["strand"]
+        row["alignLen"] = r["end_read"]
+        row["contig"] = r["contig"]
+        row["start_read"] = r["start_read"]
+        row["end_read"] = r["end_read"]
         return row
 
-    match_R = rf_df[(rf_df["readID"] == readID) & (rf_df["rf_start"] <= ps) & (rf_df["rf_end"] >= ps)]
+    # Check right forks
+    match_R = rf_df[(rf_df["readID"] == readID) &
+                    (rf_df["rf_start"] <= ps) &
+                    (rf_df["rf_end"] >= ps)]
     if not match_R.empty:
+        r = match_R.iloc[0]
         row["direction"] = "R"
-        row["right_fork_start"] = match_R.iloc[0]["rf_start"]
-        row["right_fork_end"] = match_R.iloc[0]["rf_end"]
+        row["right_fork_start"] = r["rf_start"]
+        row["right_fork_end"] = r["rf_end"]
+        row["strand"] = r["strand"]
+        row["alignLen"] = r["end_read"]
+        row["contig"] = r["contig"]
+        row["start_read"] = r["start_read"]
+        row["end_read"] = r["end_read"]
         return row
 
     return row
 
 
-def update_detect_index(row):
-    """Update the detectIndex column based on fork direction and coordinates."""
-    parts = row["detectIndex"].split("_")
-    parts[5] = row["direction"]  # update dirn
-    if row["direction"] == "L":
-        parts[6] = str(row["left_fork_start"])
-        parts[7] = str(row["left_fork_end"])
-    else:  # R
-        parts[6] = str(row["right_fork_start"])
-        parts[7] = str(row["right_fork_end"])
-    return "_".join(parts)
-
-
-def add_non_paused_forks(pause):
+def construct_detect_index(row):
     """
-    Keep rows without a fork match, update detectIndex, drop readID,
-    add keep=False, and ensure NA values for fork-related columns.
+    Construct detectIndex:
+    <readID>_<contig>_<start_read>_<end_read>_<strand>_<direction>_<fork_start>_<fork_end>
     """
-    # Keep only rows without a fork match
-    non_paused = pause[pause["direction"] == "NA"].copy()
+    fork_start = row["left_fork_start"] if row["direction"] == "L" else row["right_fork_start"]
+    fork_end = row["left_fork_end"] if row["direction"] == "L" else row["right_fork_end"]
 
-    # Update detectIndex (direction is already NA, so keep as-is)
-    non_paused["detectIndex"] = non_paused["detectIndex"]
+    return f"{row['readID']}_{row['contig']}_{row['start_read']}_{row['end_read']}_{row['strand']}_{row['direction']}_{fork_start}_{fork_end}"
 
-    # Drop temporary readID column
-    non_paused.drop(columns=["readID"], inplace=True)
 
-    # Add keep column
-    non_paused["keep"] = False
+def add_non_paused_forks(lf, rf, used_forks, template_columns):
+    rows = []
 
-    return non_paused
+    for df, start_col, end_col, direction in [
+        (lf, "lf_start", "lf_end", "L"),
+        (rf, "rf_start", "rf_end", "R")
+    ]:
+        for _, r in df.iterrows():
+            key = (r["readID"], r[start_col], r[end_col], direction)
+            if key in used_forks:
+                continue
+
+            # Start row with template columns
+            row = {col: "NA" for col in template_columns}
+
+            # Fill actual fork values
+            row["contig"] = r["contig"]
+            row["strand"] = r["strand"]
+            row["alignLen"] = r["end_read"]
+            row["start_read"] = r["start_read"]
+            row["end_read"] = r["end_read"]
+            if direction == "L":
+                row["left_fork_start"] = r["lf_start"]
+                row["left_fork_end"] = r["lf_end"]
+            else:
+                row["right_fork_start"] = r["rf_start"]
+                row["right_fork_end"] = r["rf_end"]
+
+            row["readID"] = r["readID"]
+            row["direction"] = direction
+            row["keep"] = False
+
+            # Construct detectIndex after all values are filled
+            row["detectIndex"] = construct_detect_index(row)
+
+            rows.append(row)
+
+    df_non_paused = pd.DataFrame(rows)
+
+    # Remove temporary readID column
+    df_non_paused.drop(columns=["readID"], inplace=True)
+
+    return df_non_paused
 
 
 def main():
-    # Parse arguments
     args = parse_args()
 
-    # Load fork files
-    lf = load_fork_file(args.left_fork_file, "lf")
-    rf = load_fork_file(args.right_fork_file, "rf")
-
-    # Load pause file, skipping comment lines
     pause = pd.read_csv(args.pause_file, comment="#", delim_whitespace=True)
     pause["pauseSite"] = pause["pauseSite"].astype(int)
 
-    # Keep track of original number of rows
-    original_rows = pause.shape[0]
+    lf = load_fork_file(args.left_fork_file, "lf")
+    rf = load_fork_file(args.right_fork_file, "rf")
 
     # Extract readID from detectIndex
     pause["readID"] = pause["detectIndex"].apply(lambda x: x.split("_")[0])
@@ -115,29 +156,37 @@ def main():
     pause["right_fork_start"] = "NA"
     pause["right_fork_end"] = "NA"
     pause["direction"] = "NA"
+    pause["strand"] = "NA"
+    pause["alignLen"] = "NA"
+    pause["start_read"] = "NA"
+    pause["end_read"] = "NA"
 
-    # Assign forks
+    # Assign forks to paused rows
     pause = pause.apply(assign_fork, axis=1, lf_df=lf, rf_df=rf)
 
-    # Split paused and non-paused
     paused = pause[pause["direction"] != "NA"].copy()
-    non_paused = add_non_paused_forks(pause)
-
-    # Print number of skipped rows
-    skipped_rows = original_rows - paused.shape[0]
-    print(f"Number of lines skipped (excluding comment lines): {skipped_rows}")
-
-    # Update detectIndex for paused rows
-    paused["detectIndex"] = paused.apply(update_detect_index, axis=1)
-
-    # Drop temporary readID column
-    paused.drop(columns=["readID"], inplace=True)
-
-    # Add keep column
+    paused["detectIndex"] = paused.apply(construct_detect_index, axis=1)
     paused["keep"] = True
 
-    # Combine and save
-    output = pd.concat([paused, non_paused], ignore_index=True)
-    output.to_csv(args.output_file, sep="\t", index=False)
+    # Track used forks
+    used_forks = set()
+    for _, r in paused.iterrows():
+        if r["direction"] == "L":
+            used_forks.add((r["readID"], r["left_fork_start"], r["left_fork_end"], "L"))
+        else:
+            used_forks.add((r["readID"], r["right_fork_start"], r["right_fork_end"], "R"))
 
-    print(f"Updated pause file saved to: {args.output_file}")
+    paused.drop(columns=["readID"], inplace=True)
+
+    # Add non-paused forks
+    non_paused = add_non_paused_forks(lf, rf, used_forks, paused.columns)
+
+    output = pd.concat([paused, non_paused], ignore_index=True)
+
+    # Save to output
+    output.to_csv(args.output_file, sep="\t", index=False)
+    print(f"Updated pause file saved to: {os.path.abspath(args.output_file)}")
+
+
+if __name__ == "__main__":
+    main()
