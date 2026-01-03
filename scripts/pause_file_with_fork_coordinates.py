@@ -71,6 +71,26 @@ def update_detect_index(row):
     return "_".join(parts)
 
 
+def add_non_paused_forks(pause):
+    """
+    Keep rows without a fork match, update detectIndex, drop readID,
+    add keep=False, and ensure NA values for fork-related columns.
+    """
+    # Keep only rows without a fork match
+    non_paused = pause[pause["direction"] == "NA"].copy()
+
+    # Update detectIndex (direction is already NA, so keep as-is)
+    non_paused["detectIndex"] = non_paused["detectIndex"]
+
+    # Drop temporary readID column
+    non_paused.drop(columns=["readID"], inplace=True)
+
+    # Add keep column
+    non_paused["keep"] = False
+
+    return non_paused
+
+
 def main():
     # Parse arguments
     args = parse_args()
@@ -99,23 +119,25 @@ def main():
     # Assign forks
     pause = pause.apply(assign_fork, axis=1, lf_df=lf, rf_df=rf)
 
-    # Keep only rows with a fork match
-    pause = pause[pause["direction"] != "NA"].copy()
+    # Split paused and non-paused
+    paused = pause[pause["direction"] != "NA"].copy()
+    non_paused = add_non_paused_forks(pause)
 
     # Print number of skipped rows
-    skipped_rows = original_rows - pause.shape[0]
+    skipped_rows = original_rows - paused.shape[0]
     print(f"Number of lines skipped (excluding comment lines): {skipped_rows}")
 
-    # Update detectIndex
-    pause["detectIndex"] = pause.apply(update_detect_index, axis=1)
+    # Update detectIndex for paused rows
+    paused["detectIndex"] = paused.apply(update_detect_index, axis=1)
 
     # Drop temporary readID column
-    pause.drop(columns=["readID"], inplace=True)
+    paused.drop(columns=["readID"], inplace=True)
 
-    # Save updated pause file
-    pause.to_csv(args.output_file, sep="\t", index=False)
+    # Add keep column
+    paused["keep"] = True
+
+    # Combine and save
+    output = pd.concat([paused, non_paused], ignore_index=True)
+    output.to_csv(args.output_file, sep="\t", index=False)
+
     print(f"Updated pause file saved to: {args.output_file}")
-
-
-if __name__ == "__main__":
-    main()
